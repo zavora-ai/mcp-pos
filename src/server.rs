@@ -37,6 +37,27 @@ pub struct LoyaltyRedeemInput { pub customer_id: String, pub cart_id: String, pu
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct DailySummaryInput { pub date: Option<String> }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct VoidInput { pub cart_id: String, pub actor: String, pub role: String, pub reason: String }
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct PriceOverrideInput { pub cart_id: String, pub sku: String, pub new_price: f64, pub actor: String, pub role: String, pub reason: String }
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SuspendInput { pub cart_id: String, pub reason: Option<String> }
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RecallInput { pub cart_id: String }
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SplitTenderInput { pub cart_id: String, pub payments: Vec<Value> }
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct TipInput { pub cart_id: String, pub tip_amount: f64 }
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ReprintInput { pub cart_id: String }
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct FiscalConfigInput { pub country: String, pub business_name: String, pub business_pin: Option<String>, pub device_id: Option<String>, pub currency: Option<String>, pub smallest_denomination: Option<f64>, pub receipt_prefix: Option<String> }
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RoleLimitInput { pub role: String, pub max_discount_pct: f64, pub can_void: bool, pub can_refund: bool, pub can_price_override: bool, pub max_refund_amount: Option<f64> }
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AuthorizeInput { pub action: String, pub actor: String, pub role: String }
+
 #[derive(Clone)]
 pub struct PosServer { pub store: Store }
 impl PosServer { pub fn new() -> Self { Self { store: Store::new() } } }
@@ -295,5 +316,175 @@ impl PosServer {
         let refunds: f64 = payments.iter().filter(|p| p.amount < 0.0).map(|p| p.amount.abs()).sum();
         let transactions = payments.iter().filter(|p| p.amount > 0.0).count();
         json!({"date": &now()[..10], "transactions": transactions, "cash_sales": round2(cash), "card_sales": round2(card), "mobile_sales": round2(mobile), "refunds": round2(refunds), "net_sales": round2(cash + card + mobile - refunds), "avg_transaction": if transactions > 0 { round2((cash + card + mobile) / transactions as f64) } else { 0.0 }}).to_string()
+    }
+
+    // === Business Controls ===
+
+    #[tool(description = "Void/cancel a cart (requires authorized role). Tracks who voided and why.")]
+    async fn cart_void(&self, Parameters(input): Parameters<VoidInput>) -> String {
+        let roles = self.store.roles.lock().unwrap().clone();
+        let role = roles.iter().find(|r| r.role == input.role);
+        match role {
+            Some(r) if r.can_void => {},
+            _ => return json!({"error": "UNAUTHORIZED", "message": "Role cannot void transactions", "role": input.role}).to_string(),
+        }
+        let mut carts = self.store.carts.lock().unwrap();
+        match carts.get_mut(&input.cart_id) {
+            Some(cart) => { cart.status = "voided".into(); json!({"status": "voided", "cart_id": input.cart_id, "voided_by": input.actor, "reason": input.reason}).to_string() }
+            None => json!({"error": "CART_NOT_FOUND"}).to_string(),
+        }
+    }
+
+    #[tool(description = "Override price of an item in cart (requires authorized role + reason for audit).")]
+    async fn price_override(&self, Parameters(input): Parameters<PriceOverrideInput>) -> String {
+        let roles = self.store.roles.lock().unwrap().clone();
+        let role = roles.iter().find(|r| r.role == input.role);
+        match role {
+            Some(r) if r.can_price_override => {},
+            _ => return json!({"error": "UNAUTHORIZED", "message": "Role cannot override prices"}).to_string(),
+        }
+        let mut carts = self.store.carts.lock().unwrap();
+        match carts.get_mut(&input.cart_id) {
+            Some(cart) => {
+                if let Some(item) = cart.items.iter_mut().find(|i| i.sku == input.sku) {
+                    let old_price = item.unit_price;
+                    item.unit_price = input.new_price;
+                    item.line_total = round2(item.unit_price * item.quantity + item.tax - item.discount);
+                    recalc_cart(cart);
+                    json!({"status": "overridden", "sku": input.sku, "old_price": old_price, "new_price": input.new_price, "authorized_by": input.actor, "reason": input.reason}).to_string()
+                } else { json!({"error": "ITEM_NOT_IN_CART"}).to_string() }
+            }
+            None => json!({"error": "CART_NOT_FOUND"}).to_string(),
+        }
+    }
+
+    #[tool(description = "Suspend (park) a cart for later recall. Customer stepped away, needs to get something, etc.")]
+    async fn cart_suspend(&self, Parameters(input): Parameters<SuspendInput>) -> String {
+        let mut carts = self.store.carts.lock().unwrap();
+        match carts.remove(&input.cart_id) {
+            Some(cart) => {
+                self.store.suspended.lock().unwrap().insert(input.cart_id.clone(), SuspendedCart { cart, suspended_at: now(), reason: input.reason });
+                json!({"status": "suspended", "cart_id": input.cart_id}).to_string()
+            }
+            None => json!({"error": "CART_NOT_FOUND"}).to_string(),
+        }
+    }
+
+    #[tool(description = "Recall a suspended cart back to active.")]
+    async fn cart_recall(&self, Parameters(input): Parameters<RecallInput>) -> String {
+        match self.store.suspended.lock().unwrap().remove(&input.cart_id) {
+            Some(suspended) => {
+                self.store.carts.lock().unwrap().insert(input.cart_id.clone(), suspended.cart);
+                json!({"status": "recalled", "cart_id": input.cart_id}).to_string()
+            }
+            None => json!({"error": "SUSPENDED_CART_NOT_FOUND"}).to_string(),
+        }
+    }
+
+    #[tool(description = "Split tender — pay with multiple methods (e.g. part cash, part card, part M-Pesa). Payments array: [{\"method\": \"cash\", \"amount\": 200, \"tendered\": 200}, {\"method\": \"card\", \"amount\": 143.40}]")]
+    async fn split_tender(&self, Parameters(input): Parameters<SplitTenderInput>) -> String {
+        let mut carts = self.store.carts.lock().unwrap();
+        let cart = match carts.get_mut(&input.cart_id) {
+            Some(c) => c,
+            None => return json!({"error": "CART_NOT_FOUND"}).to_string(),
+        };
+        if cart.status != "open" { return json!({"error": "CART_NOT_OPEN"}).to_string(); }
+        let total_paid: f64 = input.payments.iter().filter_map(|p| p["amount"].as_f64()).sum();
+        if total_paid < cart.total { return json!({"error": "INSUFFICIENT_PAYMENT", "total": cart.total, "paid": total_paid}).to_string(); }
+        cart.status = "checked_out".into();
+        let mut results = Vec::new();
+        for p in &input.payments {
+            let method = p["method"].as_str().unwrap_or("cash");
+            let amount = p["amount"].as_f64().unwrap_or(0.0);
+            let tendered = p["tendered"].as_f64().unwrap_or(amount);
+            let change = if method == "cash" { round2(tendered - amount) } else { 0.0 };
+            let pay = Payment { id: format!("pay_{}", uid()), cart_id: input.cart_id.clone(), method: method.into(), amount, tendered, change, reference: p["reference"].as_str().map(String::from), status: "completed".into(), timestamp: now() };
+            results.push(json!({"method": method, "amount": amount, "change": change}));
+            self.store.payments.lock().unwrap().push(pay);
+        }
+        json!({"status": "completed", "cart_id": input.cart_id, "total": cart.total, "payments": results}).to_string()
+    }
+
+    #[tool(description = "Add tip/gratuity to a cart (restaurants, services).")]
+    async fn tip_add(&self, Parameters(input): Parameters<TipInput>) -> String {
+        let mut carts = self.store.carts.lock().unwrap();
+        match carts.get_mut(&input.cart_id) {
+            Some(cart) => { cart.total = round2(cart.total + input.tip_amount); json!({"status": "tip_added", "tip": input.tip_amount, "new_total": cart.total}).to_string() }
+            None => json!({"error": "CART_NOT_FOUND"}).to_string(),
+        }
+    }
+
+    #[tool(description = "Reprint a receipt (marked as COPY for audit compliance).")]
+    async fn receipt_reprint(&self, Parameters(input): Parameters<ReprintInput>) -> String {
+        let cart = match self.store.carts.lock().unwrap().get(&input.cart_id) {
+            Some(c) => c.clone(),
+            None => return json!({"error": "CART_NOT_FOUND"}).to_string(),
+        };
+        let fiscal = self.store.fiscal.lock().unwrap().clone();
+        let mut lines = vec![
+            "================================".into(),
+            "     *** COPY / DUPLICATE ***   ".into(),
+            "================================".into(),
+            format!("  {}", fiscal.business_name),
+            format!("Date: {}", &cart.created_at[..10]),
+            format!("Cashier: {}", cart.cashier),
+            "--------------------------------".into(),
+        ];
+        for item in &cart.items { lines.push(format!("{:<20} x{:.0}  {} {:.2}", item.name, item.quantity, cart.currency, item.line_total)); }
+        lines.push("--------------------------------".into());
+        lines.push(format!("TOTAL: {} {:.2}", cart.currency, cart.total));
+        lines.push("================================".into());
+        lines.push("       *** COPY ***            ".into());
+        json!({"cart_id": input.cart_id, "is_copy": true, "receipt": lines.join("\n")}).to_string()
+    }
+
+    // === Fiscal Compliance ===
+
+    #[tool(description = "Configure fiscal settings (country, business name, tax PIN, device ID, currency, rounding). Affects receipt format and compliance fields.")]
+    async fn fiscal_config(&self, Parameters(input): Parameters<FiscalConfigInput>) -> String {
+        let mut fiscal = self.store.fiscal.lock().unwrap();
+        fiscal.country = input.country;
+        fiscal.business_name = input.business_name;
+        fiscal.business_pin = input.business_pin;
+        fiscal.device_id = input.device_id;
+        if let Some(c) = input.currency { fiscal.currency = c; }
+        if let Some(d) = input.smallest_denomination { fiscal.smallest_denomination = d; }
+        if let Some(p) = input.receipt_prefix { fiscal.receipt_prefix = p; }
+        let tax_regime = match fiscal.country.as_str() { "US" => "sales_tax", "AU"|"IN"|"SG"|"NZ" => "gst", _ => "vat" };
+        fiscal.tax_regime = tax_regime.into();
+        json!({"status": "configured", "country": fiscal.country, "tax_regime": fiscal.tax_regime, "business_name": fiscal.business_name, "device_id": fiscal.device_id}).to_string()
+    }
+
+    #[tool(description = "Set role-based limits (max discount, void/refund/override permissions).")]
+    async fn role_set_limits(&self, Parameters(input): Parameters<RoleLimitInput>) -> String {
+        let mut roles = self.store.roles.lock().unwrap();
+        if let Some(r) = roles.iter_mut().find(|r| r.role == input.role) {
+            r.max_discount_pct = input.max_discount_pct; r.can_void = input.can_void; r.can_refund = input.can_refund; r.can_price_override = input.can_price_override; r.max_refund_amount = input.max_refund_amount;
+        } else {
+            roles.push(RoleLimit { role: input.role.clone(), max_discount_pct: input.max_discount_pct, can_void: input.can_void, can_refund: input.can_refund, can_price_override: input.can_price_override, max_refund_amount: input.max_refund_amount });
+        }
+        json!({"status": "set", "role": input.role}).to_string()
+    }
+
+    #[tool(description = "Check if an actor's role is authorized for a specific action (void, refund, price_override, discount).")]
+    async fn authorize_check(&self, Parameters(input): Parameters<AuthorizeInput>) -> String {
+        let roles = self.store.roles.lock().unwrap().clone();
+        let role = roles.iter().find(|r| r.role == input.role);
+        match role {
+            Some(r) => {
+                let allowed = match input.action.as_str() {
+                    "void" => r.can_void, "refund" => r.can_refund, "price_override" => r.can_price_override,
+                    "discount" => true, _ => false,
+                };
+                json!({"authorized": allowed, "actor": input.actor, "role": input.role, "action": input.action, "max_discount_pct": r.max_discount_pct}).to_string()
+            }
+            None => json!({"authorized": false, "error": "ROLE_NOT_FOUND"}).to_string(),
+        }
+    }
+
+    #[tool(description = "List all suspended (parked) carts.")]
+    async fn suspended_list(&self) -> String {
+        let suspended: Vec<_> = self.store.suspended.lock().unwrap().values().cloned().collect();
+        json!({"count": suspended.len(), "suspended": suspended.iter().map(|s| json!({"cart_id": s.cart.id, "cashier": s.cart.cashier, "total": s.cart.total, "items": s.cart.items.len(), "suspended_at": s.suspended_at, "reason": s.reason})).collect::<Vec<_>>()}).to_string()
     }
 }

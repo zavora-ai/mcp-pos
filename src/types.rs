@@ -82,3 +82,44 @@ pub struct Receipt {
     pub lines: Vec<String>,
     pub generated_at: String,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FiscalConfig {
+    pub country: String,
+    pub tax_regime: String, // vat, gst, sales_tax
+    pub device_id: Option<String>, // ETR control unit, TSE ID
+    pub business_name: String,
+    pub business_pin: Option<String>, // KRA PIN, GSTIN, VAT number
+    pub currency: String,
+    pub smallest_denomination: f64, // rounding (e.g. 1.0 for KES, 0.01 for USD)
+    pub receipt_prefix: String,
+    pub next_receipt_number: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SuspendedCart {
+    pub cart: Cart,
+    pub suspended_at: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RoleLimit {
+    pub role: String,
+    pub max_discount_pct: f64,
+    pub can_void: bool,
+    pub can_refund: bool,
+    pub can_price_override: bool,
+    pub max_refund_amount: Option<f64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FiscalReceipt {
+    pub receipt_number: u64,
+    pub cart_id: String,
+    pub hash: String, // SHA-256 chain
+    pub previous_hash: String,
+    pub timestamp: String,
+    pub device_id: Option<String>,
+    pub is_copy: bool,
+}
