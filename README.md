@@ -6,106 +6,119 @@
 [![ADK-Rust Enterprise](https://img.shields.io/badge/ADK--Rust-Enterprise-purple.svg)](https://enterprise.adk-rust.com)
 [![Registry Ready](https://img.shields.io/badge/ADK_Registry-Ready-green.svg)](https://enterprise.adk-rust.com)
 
-Point of Sale engine for [ADK-Rust Enterprise](https://enterprise.adk-rust.com) agents. Provides 15 MCP tools covering the full retail transaction lifecycle — cart management, multi-method payments, thermal receipt generation, shift reconciliation, loyalty programs, and barcode scanning. **Zero configuration, no external dependencies.**
+Global Point of Sale engine for [ADK-Rust Enterprise](https://enterprise.adk-rust.com) agents. Provides 39 MCP tools covering the full retail transaction lifecycle across **23 countries** — cart management, 20+ payment methods, fiscal e-invoicing for 22 tax authorities, bilingual receipts in 24 languages, role-based access controls, and compliance features for every major market.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     mcp-pos (15 tools)                        │
-├───────────┬───────────┬───────────┬───────────┬─────────────┤
-│   Cart    │ Payments  │  Shifts   │  Loyalty  │  Receipts   │
-├───────────┼───────────┼───────────┼───────────┼─────────────┤
-│ Create    │ Cash      │ Open      │ Check     │ Thermal     │
-│ Add item  │ Card      │ Close     │ Redeem    │ format      │
-│ Remove    │ M-Pesa    │ Reconcile │ Points    │             │
-│ Discount  │ Refund    │ Summary   │ Tiers     │             │
-│ Barcode   │ Split     │           │           │             │
-└───────────┴───────────┴───────────┴───────────┴─────────────┘
-         │                                           │
-         ▼                                           ▼
-   mcp-inventory                              mcp-pricing
-   (stock_issue on sale)                 (dynamic pricing)
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          mcp-pos (39 tools)                               │
+├──────────┬──────────┬──────────┬──────────┬──────────┬───────────────────┤
+│   Cart   │ Payments │  Fiscal  │ Controls │ Loyalty  │   Compliance      │
+├──────────┼──────────┼──────────┼──────────┼──────────┼───────────────────┤
+│ Create   │ Cash     │ 22 e-inv │ Void     │ Points   │ Age verify        │
+│ Add/Rmv  │ Card     │ standards│ Override │ Tiers    │ Env levy          │
+│ Discount │ M-Pesa   │ Receipt  │ Suspend  │ Redeem   │ Meal voucher      │
+│ Get      │ UPI      │ sign     │ Recall   │          │ EBT/SNAP          │
+│          │ WeChat   │ Bilingual│ Roles    │          │ US state tax      │
+│          │ QRIS     │ 24 langs │ Auth     │          │ Tip calc          │
+│          │ PayNow   │          │          │          │                   │
+│          │ EBT/SNAP │          │          │          │                   │
+└──────────┴──────────┴──────────┴──────────┴──────────┴───────────────────┘
 ```
 
 ## Key Principles
 
-- **Transaction-first** — optimized for the checkout flow: scan → total → pay → receipt.
-- **Multi-payment** — cash (with change), card, mobile money (M-Pesa/Flutterwave), loyalty points.
-- **Shift management** — open/close registers with cash reconciliation and variance detection.
-- **Thermal receipts** — generates formatted text ready for 80mm thermal printers.
-- **Loyalty built-in** — points accrual, tier management, redemption as payment.
+- **23-country compliance** — native e-invoicing for every major tax authority.
+- **20+ payment methods** — cash, card, mobile money, QR payments, EBT/SNAP, meal vouchers.
+- **Role-based controls** — cashiers can't void; managers can. Configurable per-role limits.
+- **Fiscal integrity** — SHA-256 hash chain on receipts (TSE/NF525 compliant).
+- **24 receipt languages** — bilingual output for any market.
 - **Zero configuration** — starts immediately with no API keys or external services.
 
-## Tools (15)
+## Tools (39)
 
-### Product Catalog
+### Cart Management (7)
 
-| Tool | Description | Risk Class |
-|------|-------------|:----------:|
-| `product_register` | Register product (SKU, barcode, name, price, tax rate) | write |
-| `barcode_lookup` | Look up product by barcode or SKU | read-only |
+| Tool | Description |
+|------|-------------|
+| `product_register` | Register product (SKU, barcode, price, tax rate) |
+| `cart_create` | Start a new sale |
+| `cart_add_item` | Scan barcode → auto price + tax |
+| `cart_remove_item` | Remove item |
+| `cart_apply_discount` | Percentage or fixed (per-item or whole cart) |
+| `cart_get` | View cart contents and totals |
+| `barcode_lookup` | Look up product by barcode/SKU |
 
-### Cart Management
+### Payments (6)
 
-| Tool | Description | Risk Class |
-|------|-------------|:----------:|
-| `cart_create` | Start a new sale/transaction | write |
-| `cart_add_item` | Scan barcode to add item (auto price + tax) | write |
-| `cart_remove_item` | Remove item from cart | write |
-| `cart_apply_discount` | Apply percentage or fixed discount | write |
-| `cart_get` | View cart contents and totals | read-only |
+| Tool | Description |
+|------|-------------|
+| `payment_process` | Cash (with change), card, mobile money |
+| `payment_qr_generate` | Generate QR for customer scan (20+ providers) |
+| `split_tender` | Multiple payment methods per transaction |
+| `multi_currency_checkout` | Tourist pays foreign currency, shows FX |
+| `ebt_snap_pay` | US food stamps (tax-exempt items) |
+| `meal_voucher` | French Ticket Restaurant, Sodexo, Edenred |
 
-### Payments
+### Fiscal & E-Invoicing (5)
 
-| Tool | Description | Risk Class |
-|------|-------------|:----------:|
-| `payment_process` | Process payment (cash/card/mobile_money) | financial |
-| `refund` | Process return/refund (requires approval) | financial |
+| Tool | Description |
+|------|-------------|
+| `fiscal_config` | Set country, business PIN, device ID, currency |
+| `einvoice_generate` | Generate e-invoice (22 standards) |
+| `receipt_generate` | Thermal printer format |
+| `receipt_sign` | SHA-256 hash chain (TSE/NF525) |
+| `receipt_bilingual` | Dual-language receipt (24 languages) |
 
-### Receipts
+### Business Controls (9)
 
-| Tool | Description | Risk Class |
-|------|-------------|:----------:|
-| `receipt_generate` | Generate thermal printer receipt | read-only |
+| Tool | Description |
+|------|-------------|
+| `cart_void` | Cancel transaction (role-gated) |
+| `price_override` | Change price (role-gated + reason) |
+| `cart_suspend` | Park a transaction |
+| `cart_recall` | Recall parked transaction |
+| `suspended_list` | List parked carts |
+| `receipt_reprint` | Reprint marked as COPY |
+| `role_set_limits` | Configure per-role permissions |
+| `authorize_check` | Check if role can perform action |
+| `age_verify` | Block underage sales |
 
-### Shift Management
+### Shifts & Reports (3)
 
-| Tool | Description | Risk Class |
-|------|-------------|:----------:|
-| `shift_open` | Open register with opening float | write |
-| `shift_close` | Close shift, reconcile cash, detect variance | write |
+| Tool | Description |
+|------|-------------|
+| `shift_open` | Open register with float |
+| `shift_close` | Close + cash reconciliation + variance |
+| `daily_summary` | Sales totals, payment breakdown |
 
-### Loyalty
+### Loyalty (2)
 
-| Tool | Description | Risk Class |
-|------|-------------|:----------:|
-| `loyalty_check` | Check customer points and tier | read-only |
-| `loyalty_redeem` | Redeem points as payment on cart | write |
+| Tool | Description |
+|------|-------------|
+| `loyalty_check` | Check points and tier |
+| `loyalty_redeem` | Redeem points as payment |
 
-### Reports
+### Regional (7)
 
-| Tool | Description | Risk Class |
-|------|-------------|:----------:|
-| `daily_summary` | Sales totals, payment breakdown, avg transaction | read-only |
+| Tool | Description |
+|------|-------------|
+| `us_tax_lookup` | All 50 US states + DC sales tax |
+| `tip_calculate` | Tip % suggestions (15/18/20/25) |
+| `env_levy_add` | UK carrier bag, plastic tax |
+| `tax_category_set` | HSN/SAC codes (India) |
+| `buyer_identify` | Attach GSTIN/TRN/PIN to B2B |
+| `refund` | Process return (approval-gated) |
+| `tip_add` | Add gratuity |
 
 ## Installation
-
-### From crates.io
 
 ```bash
 cargo install mcp-pos
 ```
 
-### Build from source
-
-```bash
-git clone https://github.com/zavora-ai/mcp-pos
-cd mcp-pos
-cargo build --release
-```
-
-### Claude Desktop
+### Client Configuration
 
 ```json
 {
@@ -115,180 +128,172 @@ cargo build --release
 }
 ```
 
-### Kiro
+Works with Claude Desktop, Kiro, Cursor, Windsurf, Codex, and any MCP client.
 
-Add to `.kiro/settings/mcp.json`:
+## Global Coverage
 
-```json
-{
-  "mcpServers": {
-    "pos": { "command": "mcp-pos" }
-  }
-}
-```
+### E-Invoice Standards (22)
 
-### Cursor / Windsurf / Codex
+| Region | Country | Standard | Tax Authority | VAT/GST |
+|--------|---------|----------|---------------|:-------:|
+| 🇬🇧 | UK | `hmrc_mtd` | HMRC | 20% |
+| 🇩🇪 | Germany | `tse_de` | KassenSichV | 19%/7% |
+| 🇫🇷 | France | `nf525_fr` | DGFiP | 20%/10%/5.5% |
+| 🇮🇹 | Italy | `rt_it` | Agenzia Entrate | 22% |
+| 🇪🇸 | Spain | `ticketbai_es` | Hacienda | 21%/10%/4% |
+| 🇰🇪 | Kenya | `kra_etr` | KRA | 16% |
+| 🇺🇬 | Uganda | `ura_efris` | URA | 18% |
+| 🇹🇿 | Tanzania | `tra_efd` | TRA | 18% |
+| 🇪🇹 | Ethiopia | `erca` | ERCA | 15% |
+| 🇷🇼 | Rwanda | `rra_ebm` | RRA | 18% |
+| 🇿🇦 | South Africa | `sars` | SARS | 15% |
+| 🇳🇬 | Nigeria | `firs` | FIRS | 7.5% |
+| 🇪🇬 | Egypt | `eta` | ETA | 14% |
+| 🇮🇳 | India | `india_irn` | NIC/GSTN | 5-28% |
+| 🇸🇦 | Saudi Arabia | `zatca` | ZATCA | 5% |
+| 🇨🇳 | China | `fapiao` | Golden Tax | 13% |
+| 🇸🇬 | Singapore | `invoicenow_sg` | IRAS (Peppol) | 9% |
+| 🇲🇾 | Malaysia | `myinvois_my` | LHDN | 6% SST |
+| 🇹🇭 | Thailand | `etax_th` | Revenue Dept | 7% |
+| 🇮🇩 | Indonesia | `efaktur_id` | DJP | 11% |
+| 🇵🇭 | Philippines | `cas_ph` | BIR | 12% |
+| 🇻🇳 | Vietnam | `einvoice_vn` | GDT | 10% |
 
-```json
-{
-  "mcpServers": {
-    "pos": { "command": "mcp-pos" }
-  }
-}
-```
+### Payment QR Codes (20)
 
-## Quick Start
+| Provider | QR Type | Countries |
+|----------|---------|-----------|
+| M-Pesa | `mpesa` | 🇰🇪🇹🇿 |
+| MTN MoMo | `mtn_momo` | 🇺🇬🇷🇼🇬🇭 |
+| Airtel Money | `airtel_money` | 🇺🇬🇰🇪🇹🇿🇷🇼 |
+| Telebirr | `telebirr` | 🇪🇹 |
+| Tigo Pesa | `tigo_pesa` | 🇹🇿 |
+| SnapScan | `snapscan` | 🇿🇦 |
+| OPay | `opay` | 🇳🇬 |
+| PalmPay | `palmpay` | 🇳🇬 |
+| Fawry | `fawry` | 🇪🇬 |
+| UPI | `upi` | 🇮🇳 |
+| WeChat Pay | `wechat` | 🇨🇳 |
+| Alipay | `alipay` | 🇨🇳 |
+| PayNow | `paynow_sg` | 🇸🇬 |
+| DuitNow | `duitnow_my` | 🇲🇾 |
+| PromptPay | `promptpay_th` | 🇹🇭 |
+| QRIS | `qris_id` | 🇮🇩 (GoPay, OVO, Dana, ShopeePay) |
+| GCash | `gcash_ph` | 🇵🇭 |
+| Maya | `maya_ph` | 🇵🇭 |
+| VNPay | `vnpay` | 🇻🇳 |
+| MoMo VN | `momo_vn` | 🇻🇳 |
+| ZATCA QR | `zatca` | 🇸🇦 |
 
-### 1. Register products
+### Bilingual Receipts (24 languages)
 
-```json
-{"name": "product_register", "arguments": {"sku": "MILK-1L", "barcode": "5901234123457", "name": "Fresh Milk 1L", "price": 120, "tax_rate": 16}}
-{"name": "product_register", "arguments": {"sku": "BREAD-WH", "barcode": "6001234567890", "name": "White Bread", "price": 65, "tax_rate": 0}}
-```
+| Code | Language | Region |
+|:----:|----------|--------|
+| `en` | English | Global |
+| `sw` | Swahili | 🇰🇪🇹🇿 |
+| `am` | Amharic | 🇪🇹 |
+| `rw` | Kinyarwanda | 🇷🇼 |
+| `zu` | Zulu | 🇿🇦 |
+| `af` | Afrikaans | 🇿🇦 |
+| `yo` | Yoruba | 🇳🇬 |
+| `ha` | Hausa | 🇳🇬 |
+| `ar` | Arabic | 🇸🇦🇦🇪🇪🇬 |
+| `hi` | Hindi | 🇮🇳 |
+| `zh` | Chinese | 🇨🇳 |
+| `ja` | Japanese | 🇯🇵 |
+| `fr` | French | 🇫🇷🇷🇼 |
+| `de` | German | 🇩🇪🇦🇹🇨🇭 |
+| `it` | Italian | 🇮🇹 |
+| `es` | Spanish | 🇪🇸 |
+| `pt` | Portuguese | 🇵🇹🇧🇷 |
+| `nl` | Dutch | 🇳🇱🇧🇪 |
+| `pl` | Polish | 🇵🇱 |
+| `th` | Thai | 🇹🇭 |
+| `ms` | Malay | 🇲🇾 |
+| `id` | Bahasa Indonesia | 🇮🇩 |
+| `vi` | Vietnamese | 🇻🇳 |
+| `tl` | Filipino | 🇵🇭 |
 
-### 2. Open shift
+### US Sales Tax (50 states + DC)
 
-```json
-{"name": "shift_open", "arguments": {"cashier": "mary", "register_id": "REG-01", "opening_float": 5000}}
-```
-
-### 3. Create cart and scan items
-
-```json
-{"name": "cart_create", "arguments": {"cashier": "mary", "customer_id": "CUST-001"}}
-{"name": "cart_add_item", "arguments": {"cart_id": "cart_abc123", "barcode": "5901234123457", "quantity": 2}}
-{"name": "cart_add_item", "arguments": {"cart_id": "cart_abc123", "barcode": "6001234567890"}}
-```
-
-### 4. Apply discount
-
-```json
-{"name": "cart_apply_discount", "arguments": {"cart_id": "cart_abc123", "discount_type": "percentage", "value": 10}}
-```
-
-### 5. Process payment
-
-```json
-{"name": "payment_process", "arguments": {"cart_id": "cart_abc123", "method": "cash", "tendered": 400}}
-```
-
-**Response:**
-```json
-{"status": "completed", "payment_id": "pay_abc", "method": "cash", "amount": 343.40, "tendered": 400, "change": 56.60}
-```
-
-### 6. Generate receipt
-
-```json
-{"name": "receipt_generate", "arguments": {"cart_id": "cart_abc123"}}
-```
-
-**Output:**
-```
-================================
-         SALES RECEIPT          
-================================
-Date: 2026-05-27
-Cashier: mary
---------------------------------
-Fresh Milk 1L            x2
-  KES 278.40
-White Bread              x1
-  KES 65.00
---------------------------------
-Subtotal:    KES 305.00
-Tax:         KES 38.40
-TOTAL:       KES 343.40
---------------------------------
-CASH: KES 343.40
-Change: KES 56.60
-================================
-      Thank you! Come again     
-================================
-```
-
-### 7. Close shift
-
-```json
-{"name": "shift_close", "arguments": {"shift_id": "shift_abc", "counted_cash": 5340}}
-```
-
-**Response:**
-```json
-{"status": "closed", "transactions": 12, "cash_sales": 4200, "card_sales": 1800, "mobile_sales": 950, "total_sales": 6950, "expected_cash": 5343.40, "counted_cash": 5340, "variance": -3.40}
-```
-
-## Payment Methods
-
-| Method | How it works |
-|--------|-------------|
-| `cash` | Tendered amount → calculates change |
-| `card` | Full amount charged, no change |
-| `mobile_money` | M-Pesa/Flutterwave, reference stored |
-| `refund` | Negative amount, requires approval gate |
+| Rate Range | States |
+|:----------:|--------|
+| 0% | OR, NH, MT, DE, AK |
+| 2.9–4.5% | CO, MO, AL, GA, HI, WY, SD, OK, LA, NM, NY |
+| 5–6.25% | WI, ND, ME, NE, VA, AZ, OH, PA, MD, MI, IA, KY, SC, WV, VT, DC, FL, ID, IL, MA, TX, CT |
+| 6.5–7.25% | NJ, NV, MN, KS, WA, IN, MS, RI, TN, AR, CA |
 
 ## Transaction Flow
 
 ```
-product_register (setup)
-        │
-shift_open (start of day)
-        │
-cart_create ──→ cart_add_item ──→ cart_apply_discount
-        │                                    │
-        │              cart_get (review) ◄────┘
-        │                    │
-        ▼                    ▼
-payment_process ──→ receipt_generate
-        │
-        ├── loyalty points accrued
-        │
-        └── shift totals updated
-        
-shift_close (end of day, reconcile cash)
-daily_summary (reporting)
+shift_open
+    │
+    ├── cart_create
+    │       │
+    │       ├── cart_add_item (barcode scan)
+    │       ├── cart_add_item (repeat)
+    │       ├── cart_apply_discount (coupon/loyalty)
+    │       │
+    │       ├── [age_verify if restricted items]
+    │       ├── [env_levy_add if bags needed]
+    │       ├── [buyer_identify if B2B]
+    │       │
+    │       ├── payment_process / split_tender / payment_qr_generate
+    │       │
+    │       ├── receipt_generate + receipt_sign
+    │       ├── einvoice_generate (fiscal submission)
+    │       │
+    │       └── [loyalty points accrued]
+    │
+    ├── [cart_suspend → cart_recall] (parked transactions)
+    ├── [cart_void] (requires manager auth)
+    ├── [refund] (requires approval)
+    │
+    └── shift_close (reconcile cash, detect variance)
+            │
+            └── daily_summary
 ```
 
-## Loyalty Tiers
+## Role-Based Access Control
 
-| Tier | Points Required | Benefits |
-|------|:-:|---|
-| Bronze | 0 | 1 point per KES 100 spent |
-| Silver | 500 | 1.5x points multiplier |
-| Gold | 2000 | 2x points, priority service |
-| Platinum | 5000 | 3x points, exclusive offers |
+| Role | Max Discount | Void | Refund | Price Override | Configurable |
+|------|:---:|:---:|:---:|:---:|:---:|
+| Cashier | 5% | ❌ | ❌ | ❌ | ✅ |
+| Supervisor | 20% | ✅ | ✅ | ✅ | ✅ |
+| Manager | 100% | ✅ | ✅ | ✅ | ✅ |
 
-Points redeem at 1 point = 1 currency unit.
+Use `role_set_limits` to customize per-role permissions. Use `authorize_check` to verify before performing restricted actions.
 
-## Integration with Other MCP Servers
+## Quick Start
 
-| Server | Integration |
-|--------|-------------|
-| `mcp-inventory` | `stock_issue` on sale, `stock_receive` on return |
-| `mcp-pricing` | Dynamic pricing, promotions, surge |
-| `mcp-messaging` | Send receipt via SMS/push |
-| `mcp-analytics` | Sales dashboards, trends |
+### 1. Configure for your country
 
-## Configuration
+```json
+{"name": "fiscal_config", "arguments": {"country": "KE", "business_name": "Duka Mart", "business_pin": "P051234567A", "device_id": "ETR-CU-001"}}
+```
 
-### Environment Variables
+### 2. Register products
 
-| Variable | Required | Purpose |
-|----------|:--------:|---------|
-| `RUST_LOG` | No | Log level (default: `info`) |
+```json
+{"name": "product_register", "arguments": {"sku": "MILK-1L", "barcode": "5901234123457", "name": "Fresh Milk 1L", "price": 120, "tax_rate": 16}}
+```
 
-No API keys needed. All functionality is self-contained.
+### 3. Process a sale
 
-### MCP Server Manifest
+```json
+{"name": "cart_create", "arguments": {"cashier": "mary"}}
+{"name": "cart_add_item", "arguments": {"cart_id": "cart_abc", "barcode": "5901234123457", "quantity": 2}}
+{"name": "payment_qr_generate", "arguments": {"cart_id": "cart_abc", "qr_type": "mpesa", "merchant_id": "123456"}}
+{"name": "payment_process", "arguments": {"cart_id": "cart_abc", "method": "mobile_money"}}
+{"name": "receipt_generate", "arguments": {"cart_id": "cart_abc"}}
+{"name": "einvoice_generate", "arguments": {"cart_id": "cart_abc", "standard": "kra_etr"}}
+```
 
-```toml
-server_id = "mcp_pos"
-display_name = "Point of Sale"
-version = "1.0.0"
-domain = "retail"
-risk_level = "medium"
-writes_allowed = "gated"
-governance_gates = ["payment_audit"]
+### 4. US restaurant with tip
+
+```json
+{"name": "tip_calculate", "arguments": {"cart_id": "cart_abc", "tip_pct": 20, "on_pretax": true}}
+{"name": "ebt_snap_pay", "arguments": {"cart_id": "cart_abc", "card_last4": "4567"}}
 ```
 
 ## Error Codes
@@ -297,26 +302,49 @@ governance_gates = ["payment_audit"]
 |------|---------|
 | `PRODUCT_NOT_FOUND` | Barcode/SKU not in catalog |
 | `CART_NOT_FOUND` | Cart ID doesn't exist |
-| `CART_NOT_OPEN` | Cart already checked out or voided |
+| `CART_NOT_OPEN` | Already checked out or voided |
+| `UNAUTHORIZED` | Role lacks permission for action |
+| `INSUFFICIENT_POINTS` | Not enough loyalty points |
+| `INSUFFICIENT_PAYMENT` | Split tender total < cart total |
 | `SHIFT_NOT_FOUND` | Shift ID doesn't exist |
-| `INSUFFICIENT_POINTS` | Not enough loyalty points to redeem |
+| `SUSPENDED_CART_NOT_FOUND` | Parked cart not found |
+| `ITEM_NOT_IN_CART` | SKU not in current cart |
+
+## Configuration
+
+| Variable | Required | Purpose |
+|----------|:--------:|---------|
+| `RUST_LOG` | No | Log level |
+
+No API keys needed. All functionality is self-contained.
+
+## Integration
+
+| Server | How it connects |
+|--------|----------------|
+| `mcp-inventory` | `stock_issue` on sale, `stock_receive` on return |
+| `mcp-pricing` | Dynamic pricing, CEL rules, promotions |
+| `mcp-messaging` | Send receipt via SMS/push/WhatsApp |
+| `mcp-analytics` | Sales dashboards, trends, forecasting |
+| `mcp-workflow` | Approval workflows for voids/refunds |
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [mcp-server.toml](mcp-server.toml) | ADK-Rust Enterprise registry manifest |
+| [CHANGELOG.md](CHANGELOG.md) | Version history |
 | [Rust Docs](https://docs.rs/mcp-pos) | Generated API documentation |
 
 ## Contributing
 
 Contributions welcome. Priority areas:
-- Split payment (multiple methods per transaction)
-- Hold/park transactions
+- Persistent storage (SQLite/PostgreSQL)
+- Kitchen Display System (KDS) for restaurants
+- Table management
 - Offline mode with sync
-- Kitchen display system (KDS) integration
-- Table management (restaurants)
-- Weighing scale integration
+- Barcode image generation
+- Integration with physical hardware (receipt printers, cash drawers, scales)
 
 ## Contributors
 
@@ -342,4 +370,4 @@ This server implements the [ADK MCP SDK](https://crates.io/crates/adk-mcp-sdk) c
 - **HealthCheck** — async health probe for registry monitoring
 - **mcp-server.toml** — manifest declaring tools, risk classes, and credentials
 - **Structured tracing** — `RUST_LOG` env-filter for observability
-- **Payment audit** — all financial transactions logged with actor and timestamp
+- **Fiscal audit** — hash-chained receipts, role-gated financial actions
