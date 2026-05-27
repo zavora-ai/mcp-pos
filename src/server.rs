@@ -573,6 +573,10 @@ impl PosServer {
             "airtel_money" => format!("AIRTEL:PAY:{}:{}:{:.2}:{}", merchant, cart.id, cart.total, cart.currency),
             "telebirr" => format!("TELEBIRR:PAY:{}:{}:{:.2}:ETB", merchant, cart.id, cart.total),
             "tigo_pesa" => format!("TIGO:PAY:{}:{}:{:.2}:TZS", merchant, cart.id, cart.total),
+            "snapscan" => format!("SNAPSCAN:{}:{}:{:.2}:ZAR", merchant, cart.id, cart.total),
+            "opay" => format!("OPAY:PAY:{}:{}:{:.2}:NGN", merchant, cart.id, cart.total),
+            "palmpay" => format!("PALMPAY:{}:{}:{:.2}:NGN", merchant, cart.id, cart.total),
+            "fawry" => format!("FAWRY:PAY:{}:{}:{:.2}:EGP", merchant, cart.id, cart.total),
             "zatca" => {
                 // ZATCA TLV-encoded QR (simplified)
                 format!("ZATCA:1={}&2={}&3={}&4={:.2}&5={:.2}", fiscal.business_name, merchant, now(), cart.total, cart.total_tax)
@@ -700,6 +704,34 @@ impl PosServer {
                 "total_tax_exclusive": cart.subtotal, "total_tax": cart.total_tax, "total_tax_inclusive": cart.total,
                 "currency": "RWF", "sdc_receipt_number": format!("EBM-{}", invoice_number)
             }),
+            "sars" => json!({
+                "standard": "sars", "version": "1.0", "country": "ZA",
+                "invoice_number": invoice_number,
+                "seller": {"vat_number": fiscal.business_pin, "name": fiscal.business_name},
+                "buyer": {"vat_number": input.buyer_tax_id, "name": input.buyer_name},
+                "items": cart.items.iter().map(|i| json!({"description": i.name, "qty": i.quantity, "excl_amount": i.unit_price * i.quantity, "vat_rate": 15, "vat_amount": i.tax, "incl_amount": i.line_total})).collect::<Vec<_>>(),
+                "total_excl_vat": cart.subtotal, "total_vat": cart.total_tax, "total_incl_vat": cart.total,
+                "currency": "ZAR"
+            }),
+            "firs" => json!({
+                "standard": "firs", "version": "1.0", "country": "NG",
+                "invoice_number": invoice_number,
+                "seller": {"tin": fiscal.business_pin, "firs_id": fiscal.device_id, "name": fiscal.business_name},
+                "buyer": {"tin": input.buyer_tax_id, "name": input.buyer_name},
+                "items": cart.items.iter().map(|i| json!({"description": i.name, "qty": i.quantity, "unit_price": i.unit_price, "vat_rate": 7.5, "vat": i.tax, "total": i.line_total})).collect::<Vec<_>>(),
+                "total_excl_vat": cart.subtotal, "total_vat": cart.total_tax, "total_incl_vat": cart.total,
+                "currency": "NGN", "wht_applicable": false
+            }),
+            "eta" => json!({
+                "standard": "eta", "version": "1.0", "country": "EG",
+                "internal_id": invoice_number,
+                "issuer": {"registration_number": fiscal.business_pin, "name": fiscal.business_name, "type": "B"},
+                "receiver": {"registration_number": input.buyer_tax_id, "name": input.buyer_name, "type": "B"},
+                "invoice_lines": cart.items.iter().enumerate().map(|(idx, i)| json!({"internal_code": format!("EG-{}", idx+1), "description": i.name, "quantity": i.quantity, "unit_value": i.unit_price, "sales_total": i.unit_price * i.quantity, "tax_type": "T1", "tax_rate": 14, "tax_amount": i.tax, "total": i.line_total})).collect::<Vec<_>>(),
+                "net_amount": cart.subtotal, "total_sales_amount": cart.subtotal,
+                "tax_totals": [{"tax_type": "T1", "amount": cart.total_tax}],
+                "total_amount": cart.total, "currency": "EGP"
+            }),
             _ => json!({"error": "UNKNOWN_STANDARD", "supported": ["india_irn", "zatca", "kra_etr", "fapiao"]}),
         };
         json!({"invoice_number": invoice_number, "standard": input.standard, "payload": payload}).to_string()
@@ -730,6 +762,10 @@ impl PosServer {
             "fr" => ("Reçu de Vente", "Total", "Merci de votre visite"),
             "am" => ("የሽያጭ ደረሰኝ", "ጠቅላላ", "እናመሰግናለን"),
             "rw" => ("Inyemezabuguzi", "Igiteranyo", "Murakoze"),
+            "zu" => ("Irisidi Yokuthengisa", "Isamba", "Siyabonga"),
+            "af" => ("Verkoopbewys", "Totaal", "Dankie vir u aankope"),
+            "yo" => ("Ìwé-ẹ̀rí Títà", "Àpapọ̀", "A dúpẹ́"),
+            "ha" => ("Takardar Siyarwa", "Jimla", "Mun gode"),
             _ => ("Receipt", "Total", "Thank you"),
         };
         let mut lines = vec![
