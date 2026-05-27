@@ -1,0 +1,116 @@
+server_id = "mcp_pos"
+display_name = "Point of Sale"
+version = "1.0.0"
+domain = "retail"
+sdk_version = "0.1.0"
+risk_level = "medium"
+writes_allowed = "gated"
+transports = ["stdio"]
+credentials = []
+governance_gates = ["payment_audit"]
+environments = ["development", "staging", "production"]
+
+[[tools]]
+name = "product_register"
+description = "Register product in POS catalog"
+risk_class = "internal_write"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "cart_create"
+description = "Start a new sale"
+risk_class = "internal_write"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "cart_add_item"
+description = "Scan/add item to cart"
+risk_class = "internal_write"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "cart_remove_item"
+description = "Remove item from cart"
+risk_class = "internal_write"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "cart_apply_discount"
+description = "Apply discount to cart"
+risk_class = "internal_write"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "cart_get"
+description = "View cart contents"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "payment_process"
+description = "Process payment"
+risk_class = "financial_action"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "receipt_generate"
+description = "Generate receipt"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "refund"
+description = "Process refund"
+risk_class = "financial_action"
+requires_approval = true
+credential_bindings = []
+
+[[tools]]
+name = "shift_open"
+description = "Open register shift"
+risk_class = "internal_write"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "shift_close"
+description = "Close shift and reconcile"
+risk_class = "internal_write"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "barcode_lookup"
+description = "Look up product by barcode"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "loyalty_check"
+description = "Check loyalty points"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "loyalty_redeem"
+description = "Redeem loyalty points"
+risk_class = "internal_write"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "daily_summary"
+description = "Daily sales summary"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []

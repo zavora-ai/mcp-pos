@@ -1,0 +1,21 @@
+[workspace]
+
+[package]
+name = "mcp-pos"
+version = "1.0.0"
+edition = "2024"
+description = "Point of Sale MCP server — cart management, payments, receipts, shifts, loyalty, barcode lookup, returns"
+license = "Apache-2.0"
+repository = "https://github.com/zavora-ai/mcp-pos"
+keywords = ["mcp", "pos", "point-of-sale", "retail", "payments"]
+categories = ["api-bindings"]
+
+[dependencies]
+adk-mcp-sdk = "0.1"
+rmcp = { version = "1.7", features = ["server", "transport-io", "macros"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
