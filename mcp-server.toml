@@ -1,6 +1,6 @@
 server_id = "mcp_pos"
 display_name = "Point of Sale"
-version = "1.5.0"
+version = "1.6.0"
 domain = "retail"
 sdk_version = "0.1.0"
 risk_level = "medium"

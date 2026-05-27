@@ -617,6 +617,14 @@ impl PosServer {
             "opay" => format!("OPAY:PAY:{}:{}:{:.2}:NGN", merchant, cart.id, cart.total),
             "palmpay" => format!("PALMPAY:{}:{}:{:.2}:NGN", merchant, cart.id, cart.total),
             "fawry" => format!("FAWRY:PAY:{}:{}:{:.2}:EGP", merchant, cart.id, cart.total),
+            "paynow_sg" => format!("https://sgqr.com/paynow?UEN={}&AMT={:.2}&REF={}", merchant, cart.total, cart.id),
+            "duitnow_my" => format!("DUITNOW:{}:{}:{:.2}:MYR", merchant, cart.id, cart.total),
+            "promptpay_th" => format!("https://promptpay.io/{}?amount={:.2}", merchant, cart.total),
+            "qris_id" => format!("QRIS:{}:{}:{:.2}:IDR", merchant, cart.id, cart.total),
+            "gcash_ph" => format!("GCASH:PAY:{}:{}:{:.2}:PHP", merchant, cart.id, cart.total),
+            "maya_ph" => format!("MAYA:PAY:{}:{}:{:.2}:PHP", merchant, cart.id, cart.total),
+            "vnpay" => format!("VNPAY:{}:{}:{:.0}:VND", merchant, cart.id, cart.total),
+            "momo_vn" => format!("MOMO:PAY:{}:{}:{:.0}:VND", merchant, cart.id, cart.total),
             "zatca" => {
                 // ZATCA TLV-encoded QR (simplified)
                 format!("ZATCA:1={}&2={}&3={}&4={:.2}&5={:.2}", fiscal.business_name, merchant, now(), cart.total, cart.total_tax)
@@ -821,6 +829,60 @@ impl PosServer {
                 "moneda": "EUR", "firma_ticketbai": format!("TBAI-{}", uid()),
                 "codigo_qr_tbai": format!("https://batuz.eus/TBAI/{}", uid())
             }),
+            "invoicenow_sg" => json!({
+                "standard": "invoicenow_sg", "version": "2.0", "country": "SG", "network": "Peppol",
+                "invoice_number": invoice_number,
+                "supplier": {"uen": fiscal.business_pin, "name": fiscal.business_name, "gst_reg": fiscal.business_pin},
+                "customer": {"uen": input.buyer_tax_id, "name": input.buyer_name},
+                "lines": cart.items.iter().map(|i| json!({"description": i.name, "qty": i.quantity, "unit_price": i.unit_price, "gst_rate": 9, "gst": i.tax, "amount": i.line_total})).collect::<Vec<_>>(),
+                "subtotal": cart.subtotal, "gst_total": cart.total_tax, "total": cart.total,
+                "currency": "SGD"
+            }),
+            "myinvois_my" => json!({
+                "standard": "myinvois_my", "version": "1.0", "country": "MY", "authority": "LHDN",
+                "invoice_number": invoice_number,
+                "supplier": {"tin": fiscal.business_pin, "brn": fiscal.device_id, "name": fiscal.business_name},
+                "buyer": {"tin": input.buyer_tax_id, "name": input.buyer_name},
+                "items": cart.items.iter().map(|i| json!({"description": i.name, "qty": i.quantity, "unit_price": i.unit_price, "sst_rate": 6, "sst": i.tax, "total": i.line_total})).collect::<Vec<_>>(),
+                "subtotal": cart.subtotal, "total_sst": cart.total_tax, "total_incl": cart.total,
+                "currency": "MYR"
+            }),
+            "etax_th" => json!({
+                "standard": "etax_th", "version": "3.0", "country": "TH", "authority": "Revenue Department",
+                "invoice_number": invoice_number,
+                "seller": {"tax_id": fiscal.business_pin, "name": fiscal.business_name},
+                "buyer": {"tax_id": input.buyer_tax_id, "name": input.buyer_name},
+                "items": cart.items.iter().map(|i| json!({"description": i.name, "qty": i.quantity, "price_per_unit": i.unit_price, "vat_rate": 7, "vat": i.tax, "amount": i.line_total})).collect::<Vec<_>>(),
+                "total_before_vat": cart.subtotal, "total_vat": cart.total_tax, "grand_total": cart.total,
+                "currency": "THB"
+            }),
+            "efaktur_id" => json!({
+                "standard": "efaktur_id", "version": "4.0", "country": "ID", "authority": "DJP",
+                "nomor_faktur": invoice_number,
+                "penjual": {"npwp": fiscal.business_pin, "nama": fiscal.business_name},
+                "pembeli": {"npwp": input.buyer_tax_id, "nama": input.buyer_name},
+                "detail": cart.items.iter().map(|i| json!({"nama_barang": i.name, "jumlah": i.quantity, "harga_satuan": i.unit_price, "ppn_rate": 11, "ppn": i.tax, "total": i.line_total})).collect::<Vec<_>>(),
+                "dpp": cart.subtotal, "ppn": cart.total_tax, "total": cart.total,
+                "mata_uang": "IDR"
+            }),
+            "cas_ph" => json!({
+                "standard": "cas_ph", "version": "1.0", "country": "PH", "authority": "BIR",
+                "invoice_number": invoice_number, "permit_number": fiscal.device_id,
+                "seller": {"tin": fiscal.business_pin, "name": fiscal.business_name},
+                "buyer": {"tin": input.buyer_tax_id, "name": input.buyer_name},
+                "items": cart.items.iter().map(|i| json!({"description": i.name, "qty": i.quantity, "unit_price": i.unit_price, "vat_rate": 12, "vat": i.tax, "amount": i.line_total})).collect::<Vec<_>>(),
+                "vatable_sales": cart.subtotal, "vat_amount": cart.total_tax, "total_due": cart.total,
+                "currency": "PHP"
+            }),
+            "einvoice_vn" => json!({
+                "standard": "einvoice_vn", "version": "2.0", "country": "VN", "authority": "GDT",
+                "invoice_number": invoice_number, "invoice_symbol": fiscal.receipt_prefix,
+                "seller": {"tax_code": fiscal.business_pin, "name": fiscal.business_name},
+                "buyer": {"tax_code": input.buyer_tax_id, "name": input.buyer_name},
+                "items": cart.items.iter().map(|i| json!({"ten_hang": i.name, "so_luong": i.quantity, "don_gia": i.unit_price, "thue_suat": 10, "tien_thue": i.tax, "thanh_tien": i.line_total})).collect::<Vec<_>>(),
+                "tong_tien_chua_thue": cart.subtotal, "tong_tien_thue": cart.total_tax, "tong_tien_thanh_toan": cart.total,
+                "don_vi_tien_te": "VND"
+            }),
             _ => json!({"error": "UNKNOWN_STANDARD", "supported": ["india_irn", "zatca", "kra_etr", "fapiao"]}),
         };
         json!({"invoice_number": invoice_number, "standard": input.standard, "payload": payload}).to_string()
@@ -861,6 +923,11 @@ impl PosServer {
             "pt" => ("Recibo de Venda", "Total", "Obrigado pela sua compra"),
             "nl" => ("Kassabon", "Totaal", "Bedankt voor uw aankoop"),
             "pl" => ("Paragon", "Suma", "Dziękujemy za zakupy"),
+            "th" => ("ใบเสร็จรับเงิน", "รวมทั้งสิ้น", "ขอบคุณที่ใช้บริการ"),
+            "ms" => ("Resit Jualan", "Jumlah", "Terima kasih"),
+            "id" => ("Struk Penjualan", "Total", "Terima kasih atas kunjungan Anda"),
+            "vi" => ("Hóa đơn bán hàng", "Tổng cộng", "Cảm ơn quý khách"),
+            "tl" => ("Resibo ng Benta", "Kabuuan", "Salamat po"),
             _ => ("Receipt", "Total", "Thank you"),
         };
         let mut lines = vec![
