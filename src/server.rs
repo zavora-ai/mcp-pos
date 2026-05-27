@@ -164,6 +164,40 @@ pub struct MealVoucherInput {
     pub reference: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UsTaxInput {
+    /// State code (2-letter, e.g. "CA", "TX", "NY")
+    pub state: String,
+    /// County name (optional, for combined rate)
+    pub county: Option<String>,
+    /// City name (optional)
+    pub city: Option<String>,
+    /// Amount to calculate tax on
+    pub amount: Option<f64>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct EbtSnapInput {
+    /// Cart ID
+    pub cart_id: String,
+    /// EBT card number (last 4 for reference)
+    pub card_last4: String,
+    /// Amount to pay with EBT
+    pub amount: Option<f64>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct TipConfigInput {
+    /// Cart ID
+    pub cart_id: String,
+    /// Tip amount (fixed) OR tip_pct for percentage
+    pub tip_amount: Option<f64>,
+    /// Tip percentage (e.g. 15, 18, 20, 25)
+    pub tip_pct: Option<f64>,
+    /// Pre-tax or post-tax tip calculation
+    pub on_pretax: Option<bool>,
+}
+
 #[derive(Clone)]
 pub struct PosServer { pub store: Store }
 impl PosServer { pub fn new() -> Self { Self { store: Store::new() } } }
@@ -1031,6 +1065,69 @@ impl PosServer {
             None => json!({"error": "CART_NOT_FOUND"}).to_string(),
         }
     }
+
+    // === US-Specific Tools ===
+
+    #[tool(description = "Get US sales tax rate for any state (all 50 states + DC). Returns base state rate. Note: counties/cities may add additional tax.")]
+    async fn us_tax_lookup(&self, Parameters(input): Parameters<UsTaxInput>) -> String {
+        let (rate, name) = us_state_tax(&input.state);
+        let county_add = input.county.as_ref().map(|_| 1.5).unwrap_or(0.0); // Estimated county addition
+        let city_add = input.city.as_ref().map(|_| 0.75).unwrap_or(0.0); // Estimated city addition
+        let combined = rate + county_add + city_add;
+        let tax_amount = input.amount.map(|a| round2(a * combined / 100.0));
+        json!({
+            "state": input.state, "state_name": name,
+            "state_rate_pct": rate,
+            "county": input.county, "county_rate_pct": county_add,
+            "city": input.city, "city_rate_pct": city_add,
+            "combined_rate_pct": combined,
+            "tax_amount": tax_amount,
+            "total": input.amount.map(|a| round2(a + a * combined / 100.0)),
+            "no_tax_states": ["OR", "NH", "MT", "DE", "AK"],
+            "note": "County/city rates are estimates. Use tax API for exact rates."
+        }).to_string()
+    }
+
+    #[tool(description = "Process EBT/SNAP payment (US food stamps). SNAP-eligible items are tax-exempt. Splits cart into SNAP-eligible and non-eligible.")]
+    async fn ebt_snap_pay(&self, Parameters(input): Parameters<EbtSnapInput>) -> String {
+        let mut carts = self.store.carts.lock().unwrap();
+        match carts.get_mut(&input.cart_id) {
+            Some(cart) => {
+                // In real implementation, items would be flagged as SNAP-eligible
+                // For now, assume food items (no tax) are SNAP-eligible
+                let snap_eligible: f64 = cart.items.iter().filter(|i| i.tax == 0.0).map(|i| i.line_total).sum();
+                let snap_amount = input.amount.unwrap_or(snap_eligible).min(snap_eligible);
+                let remaining = round2(cart.total - snap_amount);
+                let pay = Payment { id: format!("pay_{}", uid()), cart_id: input.cart_id.clone(), method: "ebt_snap".into(), amount: snap_amount, tendered: snap_amount, change: 0.0, reference: Some(format!("EBT-****{}", input.card_last4)), status: "completed".into(), timestamp: now() };
+                self.store.payments.lock().unwrap().push(pay);
+                if remaining <= 0.0 { cart.status = "checked_out".into(); }
+                json!({"status": "accepted", "method": "ebt_snap", "snap_eligible_total": snap_eligible, "snap_applied": snap_amount, "remaining_to_pay": remaining, "note": "SNAP items are sales-tax exempt"}).to_string()
+            }
+            None => json!({"error": "CART_NOT_FOUND"}).to_string(),
+        }
+    }
+
+    #[tool(description = "Add tip with percentage calculation (US restaurants). Supports pre-tax or post-tax tip, and suggested percentages (15%, 18%, 20%, 25%).")]
+    async fn tip_calculate(&self, Parameters(input): Parameters<TipConfigInput>) -> String {
+        let carts = self.store.carts.lock().unwrap();
+        match carts.get(&input.cart_id) {
+            Some(cart) => {
+                let base = if input.on_pretax.unwrap_or(true) { cart.subtotal } else { cart.total };
+                let tip = if let Some(amt) = input.tip_amount { amt }
+                    else if let Some(pct) = input.tip_pct { round2(base * pct / 100.0) }
+                    else { 0.0 };
+                let new_total = round2(cart.total + tip);
+                let suggestions = vec![
+                    json!({"pct": 15, "amount": round2(base * 0.15)}),
+                    json!({"pct": 18, "amount": round2(base * 0.18)}),
+                    json!({"pct": 20, "amount": round2(base * 0.20)}),
+                    json!({"pct": 25, "amount": round2(base * 0.25)}),
+                ];
+                json!({"cart_id": input.cart_id, "subtotal": cart.subtotal, "tax": cart.total_tax, "tip": tip, "new_total": new_total, "tip_on": if input.on_pretax.unwrap_or(true) { "pre-tax" } else { "post-tax" }, "suggestions": suggestions}).to_string()
+            }
+            None => json!({"error": "CART_NOT_FOUND"}).to_string(),
+        }
+    }
 }
 
 // Simple hash function (production would use sha2 crate)
@@ -1038,4 +1135,30 @@ fn md5_simple(input: &str) -> u128 {
     let mut hash: u128 = 0xcbf29ce484222325;
     for byte in input.bytes() { hash ^= byte as u128; hash = hash.wrapping_mul(0x100000001b3); }
     hash
+}
+
+/// US state sales tax rates (base state rate — cities/counties add on top)
+fn us_state_tax(state: &str) -> (f64, &'static str) {
+    match state.to_uppercase().as_str() {
+        "AL" => (4.0, "Alabama"), "AZ" => (5.6, "Arizona"), "AR" => (6.5, "Arkansas"),
+        "CA" => (7.25, "California"), "CO" => (2.9, "Colorado"), "CT" => (6.35, "Connecticut"),
+        "DC" => (6.0, "District of Columbia"), "FL" => (6.0, "Florida"), "GA" => (4.0, "Georgia"),
+        "HI" => (4.0, "Hawaii"), "ID" => (6.0, "Idaho"), "IL" => (6.25, "Illinois"),
+        "IN" => (7.0, "Indiana"), "IA" => (6.0, "Iowa"), "KS" => (6.5, "Kansas"),
+        "KY" => (6.0, "Kentucky"), "LA" => (4.45, "Louisiana"), "ME" => (5.5, "Maine"),
+        "MD" => (6.0, "Maryland"), "MA" => (6.25, "Massachusetts"), "MI" => (6.0, "Michigan"),
+        "MN" => (6.875, "Minnesota"), "MS" => (7.0, "Mississippi"), "MO" => (4.225, "Missouri"),
+        "NE" => (5.5, "Nebraska"), "NV" => (6.85, "Nevada"), "NJ" => (6.625, "New Jersey"),
+        "NM" => (4.875, "New Mexico"), "NY" => (4.0, "New York"), "NC" => (4.75, "North Carolina"),
+        "ND" => (5.0, "North Dakota"), "OH" => (5.75, "Ohio"), "OK" => (4.5, "Oklahoma"),
+        "PA" => (6.0, "Pennsylvania"), "RI" => (7.0, "Rhode Island"), "SC" => (6.0, "South Carolina"),
+        "SD" => (4.2, "South Dakota"), "TN" => (7.0, "Tennessee"), "TX" => (6.25, "Texas"),
+        "UT" => (6.1, "Utah"), "VT" => (6.0, "Vermont"), "VA" => (5.3, "Virginia"),
+        "WA" => (6.5, "Washington"), "WV" => (6.0, "West Virginia"), "WI" => (5.0, "Wisconsin"),
+        "WY" => (4.0, "Wyoming"),
+        // No sales tax states
+        "OR" => (0.0, "Oregon"), "NH" => (0.0, "New Hampshire"), "MT" => (0.0, "Montana"),
+        "DE" => (0.0, "Delaware"), "AK" => (0.0, "Alaska"),
+        _ => (0.0, "Unknown"),
+    }
 }
