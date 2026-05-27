@@ -569,6 +569,10 @@ impl PosServer {
             "wechat" => format!("wxp://f2f/{}/pay?total_fee={}&body=POS-{}", merchant, (cart.total * 100.0) as i64, cart.id),
             "alipay" => format!("https://qr.alipay.com/{}?amount={:.2}&memo=POS-{}", merchant, cart.total, cart.id),
             "mpesa" => format!("MPESA:BUY_GOODS:{}:{}:{:.2}", merchant, cart.id, cart.total),
+            "mtn_momo" => format!("MOMO:PAY:{}:{}:{:.2}:{}", merchant, cart.id, cart.total, cart.currency),
+            "airtel_money" => format!("AIRTEL:PAY:{}:{}:{:.2}:{}", merchant, cart.id, cart.total, cart.currency),
+            "telebirr" => format!("TELEBIRR:PAY:{}:{}:{:.2}:ETB", merchant, cart.id, cart.total),
+            "tigo_pesa" => format!("TIGO:PAY:{}:{}:{:.2}:TZS", merchant, cart.id, cart.total),
             "zatca" => {
                 // ZATCA TLV-encoded QR (simplified)
                 format!("ZATCA:1={}&2={}&3={}&4={:.2}&5={:.2}", fiscal.business_name, merchant, now(), cart.total, cart.total_tax)
@@ -660,6 +664,42 @@ impl PosServer {
                 "total": cart.total, "tax": cart.total_tax,
                 "status": "pending_golden_tax"
             }),
+            "ura_efris" => json!({
+                "standard": "ura_efris", "version": "2.0", "country": "UG",
+                "device_id": fiscal.device_id, "invoice_number": invoice_number,
+                "seller": {"tin": fiscal.business_pin, "name": fiscal.business_name},
+                "buyer": {"tin": input.buyer_tax_id, "name": input.buyer_name},
+                "items": cart.items.iter().map(|i| json!({"description": i.name, "qty": i.quantity, "unit_price": i.unit_price, "tax_rate": 18, "total": i.line_total})).collect::<Vec<_>>(),
+                "total_excl_tax": cart.subtotal, "total_tax": cart.total_tax, "total_incl_tax": cart.total,
+                "currency": "UGX", "fiscal_doc_number": invoice_number
+            }),
+            "tra_efd" => json!({
+                "standard": "tra_efd", "version": "1.0", "country": "TZ",
+                "efd_serial": fiscal.device_id, "receipt_number": invoice_number,
+                "seller": {"tin": fiscal.business_pin, "vrn": fiscal.business_pin, "name": fiscal.business_name},
+                "buyer": {"tin": input.buyer_tax_id, "name": input.buyer_name},
+                "items": cart.items.iter().map(|i| json!({"desc": i.name, "qty": i.quantity, "amt": i.unit_price * i.quantity, "vat_code": "A", "vat_rate": 18})).collect::<Vec<_>>(),
+                "totals": {"net_amount": cart.subtotal, "tax_amount": cart.total_tax, "gross_amount": cart.total},
+                "currency": "TZS", "receipt_verification_code": format!("TRA-{}", uid())
+            }),
+            "erca" => json!({
+                "standard": "erca", "version": "1.0", "country": "ET",
+                "machine_id": fiscal.device_id, "invoice_number": invoice_number,
+                "seller": {"tin": fiscal.business_pin, "name": fiscal.business_name},
+                "buyer": {"tin": input.buyer_tax_id, "name": input.buyer_name},
+                "items": cart.items.iter().map(|i| json!({"description": i.name, "quantity": i.quantity, "unit_price": i.unit_price, "vat": 15, "total": i.line_total})).collect::<Vec<_>>(),
+                "sub_total": cart.subtotal, "vat_total": cart.total_tax, "grand_total": cart.total,
+                "currency": "ETB"
+            }),
+            "rra_ebm" => json!({
+                "standard": "rra_ebm", "version": "2.1", "country": "RW",
+                "sdcid": fiscal.device_id, "invoice_number": invoice_number,
+                "seller": {"tin": fiscal.business_pin, "name": fiscal.business_name},
+                "buyer": {"tin": input.buyer_tax_id, "name": input.buyer_name},
+                "items": cart.items.iter().map(|i| json!({"item_desc": i.name, "qty": i.quantity, "unit_price": i.unit_price, "tax_rate": 18, "total": i.line_total})).collect::<Vec<_>>(),
+                "total_tax_exclusive": cart.subtotal, "total_tax": cart.total_tax, "total_tax_inclusive": cart.total,
+                "currency": "RWF", "sdc_receipt_number": format!("EBM-{}", invoice_number)
+            }),
             _ => json!({"error": "UNKNOWN_STANDARD", "supported": ["india_irn", "zatca", "kra_etr", "fapiao"]}),
         };
         json!({"invoice_number": invoice_number, "standard": input.standard, "payload": payload}).to_string()
@@ -688,6 +728,8 @@ impl PosServer {
             "sw" => ("Risiti ya Mauzo", "Jumla", "Asante kwa kununua"),
             "ja" => ("販売レシート", "合計", "ありがとうございました"),
             "fr" => ("Reçu de Vente", "Total", "Merci de votre visite"),
+            "am" => ("የሽያጭ ደረሰኝ", "ጠቅላላ", "እናመሰግናለን"),
+            "rw" => ("Inyemezabuguzi", "Igiteranyo", "Murakoze"),
             _ => ("Receipt", "Total", "Thank you"),
         };
         let mut lines = vec![
